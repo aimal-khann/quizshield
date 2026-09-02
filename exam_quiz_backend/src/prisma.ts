@@ -9,18 +9,23 @@ const connectionString = process.env.DATABASE_URL;
 
 const pool = new pg.Pool({
   connectionString,
-  connectionTimeoutMillis: 10000,
-  idleTimeoutMillis: 30000,
+  ssl: {
+    rejectUnauthorized: false,
+  },
   max: 10,
+  idleTimeoutMillis: 15000,
+  connectionTimeoutMillis: 10000,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
 });
 
 pool.on("error", (err) => {
-  console.error("Unexpected error on idle pg client:", err);
+  console.warn("Recovering from idle client connection error:", err.message);
 });
 
 const adapter = new PrismaPg(pool, {
-  onPoolError: (err) => console.error("Prisma PG Pool Error:", err),
-  onConnectionError: (err) => console.error("Prisma PG Connection Error:", err),
+  onPoolError: (err) => console.warn("Prisma PG Pool warning:", err.message),
+  onConnectionError: (err) => console.warn("Prisma PG Connection warning:", err.message),
 });
 
 const prisma = new PrismaClient({ adapter });

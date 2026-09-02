@@ -14,6 +14,9 @@ out/
 # User credentials
 users_credentials.md
 
+# Instructions (local only)
+instruction_for_inserting_mcqs_in_database.md
+
 # Debug logs
 npm-debug.log*
 yarn-debug.log*

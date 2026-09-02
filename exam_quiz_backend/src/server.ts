@@ -28,10 +28,15 @@ import {
 
 const app = express();
 
-const JWT_SECRET = process.env.JWT_SECRET || "fallback-secret-key";
-const ADMIN_PIN = process.env.ADMIN_PIN || "mr.happy.4G";
+const JWT_SECRET = process.env.JWT_SECRET;
+const ADMIN_PIN = process.env.ADMIN_PIN;
 const isProduction = process.env.NODE_ENV === "production";
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+
+if (!JWT_SECRET || !ADMIN_PIN) {
+  console.error("FATAL: Missing required env vars: JWT_SECRET, ADMIN_PIN");
+  process.exit(1);
+}
 
 // ═══════════════════════════════════════════════════════════════
 // SECURITY MIDDLEWARE STACK
@@ -733,6 +738,166 @@ app.delete("/api/admin/questions/:questionId", adminLimiter, async (req: Request
     res.json({ success: true });
   } catch (error) {
     console.error("Admin delete question error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ADMIN: USER MANAGEMENT
+// ═══════════════════════════════════════════════════════════════
+
+// List all users with attempt counts
+app.get("/api/admin/users", adminLimiter, async (req: Request, res: Response) => {
+  try {
+    const { adminPin } = req.query;
+    if (adminPin !== ADMIN_PIN) return res.status(403).json({ error: "Invalid admin PIN" });
+
+    const users = await prisma.user.findMany({
+      select: {
+        id: true,
+        username: true,
+        attempts: {
+          select: {
+            id: true,
+            quizId: true,
+            score: true,
+            status: true,
+            tabSwitches: true,
+            createdAt: true,
+            quiz: { select: { title: true } },
+          },
+        },
+      },
+      orderBy: { id: "asc" },
+    });
+
+    res.json(users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      attemptCount: u.attempts.length,
+      attempts: u.attempts.map((a) => ({
+        attemptId: a.id,
+        quizId: a.quizId,
+        quizTitle: a.quiz.title,
+        score: a.score,
+        status: a.status,
+        tabSwitches: a.tabSwitches,
+        createdAt: a.createdAt,
+      })),
+    })));
+  } catch (error) {
+    console.error("Admin list users error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Create a new user
+app.post("/api/admin/users", adminLimiter, bodySizeGuard(5), async (req: Request, res: Response) => {
+  try {
+    const { adminPin, username, pin } = req.body || {};
+    if (adminPin !== ADMIN_PIN) return res.status(403).json({ error: "Invalid admin PIN" });
+
+    const usernameErr = validateUsername(username);
+    if (usernameErr) return res.status(400).json({ error: usernameErr });
+
+    const pinErr = validatePin(pin);
+    if (pinErr) return res.status(400).json({ error: pinErr });
+
+    const cleanUsername = sanitize(username).toLowerCase();
+
+    // Check if user already exists
+    const existing = await prisma.user.findUnique({ where: { username: cleanUsername } });
+    if (existing) {
+      return res.status(409).json({ error: "Username already exists" });
+    }
+
+    const user = await prisma.user.create({
+      data: { username: cleanUsername, pin: pin.trim() },
+      select: { id: true, username: true },
+    });
+
+    logSecurity("ADMIN_USER_CREATED", `User ${user.id}: ${user.username}`, "", req);
+    res.json({ id: user.id, username: user.username });
+  } catch (error) {
+    console.error("Admin create user error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Delete a user and all their attempts
+app.delete("/api/admin/users/:userId", adminLimiter, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const { adminPin } = req.query;
+    if (adminPin !== ADMIN_PIN) return res.status(403).json({ error: "Invalid admin PIN" });
+
+    const user = await prisma.user.findUnique({ where: { id: Number(userId) } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Delete answers → attempts → user
+    const attempts = await prisma.attempt.findMany({ where: { userId: Number(userId) }, select: { id: true } });
+    const attemptIds = attempts.map((a) => a.id);
+    await prisma.answer.deleteMany({ where: { attemptId: { in: attemptIds } } });
+    await prisma.attempt.deleteMany({ where: { userId: Number(userId) } });
+    await prisma.user.delete({ where: { id: Number(userId) } });
+
+    logSecurity("ADMIN_USER_DELETED", `User ${userId}: ${user.username}`, "", req);
+    res.json({ success: true, message: `User "${user.username}" deleted` });
+  } catch (error) {
+    console.error("Admin delete user error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Get individual user results
+app.get("/api/admin/users/:userId/results", adminLimiter, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const { adminPin } = req.query;
+    if (adminPin !== ADMIN_PIN) return res.status(403).json({ error: "Invalid admin PIN" });
+
+    const user = await prisma.user.findUnique({
+      where: { id: Number(userId) },
+      select: { id: true, username: true },
+    });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const attempts = await prisma.attempt.findMany({
+      where: { userId: Number(userId) },
+      include: {
+        quiz: { select: { id: true, title: true, timeLimit: true } },
+        answers: {
+          include: {
+            question: { select: { id: true, text: true, options: true, correctAnswer: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    res.json({
+      user,
+      attempts: attempts.map((a) => ({
+        attemptId: a.id,
+        quizId: a.quiz.id,
+        quizTitle: a.quiz.title,
+        timeLimit: a.quiz.timeLimit,
+        score: a.score,
+        status: a.status,
+        tabSwitches: a.tabSwitches,
+        startedAt: a.createdAt,
+        answers: a.answers.map((ans) => ({
+          questionId: ans.question.id,
+          questionText: ans.question.text,
+          options: ans.question.options,
+          correctAnswer: ans.question.correctAnswer,
+          selectedOption: ans.selectedOption,
+          isCorrect: ans.selectedOption === ans.question.correctAnswer,
+        })),
+      })),
+    });
+  } catch (error) {
+    console.error("Admin user results error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

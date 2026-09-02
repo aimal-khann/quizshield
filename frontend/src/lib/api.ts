@@ -217,6 +217,64 @@ export async function adminUpdateQuestion(
   );
 }
 
+export async function adminListUsers(adminPin: string) {
+  return apiFetch<Array<{
+    id: number;
+    username: string;
+    attemptCount: number;
+    attempts: Array<{
+      attemptId: number;
+      quizId: number;
+      quizTitle: string;
+      score: number;
+      status: string;
+      tabSwitches: number;
+      createdAt: string;
+    }>;
+  }>>(`/admin/users?adminPin=${encodeURIComponent(adminPin)}`);
+}
+
+export async function adminCreateUser(adminPin: string, username: string, pin: string) {
+  return apiFetch<{ id: number; username: string }>(
+    "/admin/users",
+    {
+      method: "POST",
+      body: JSON.stringify({ adminPin, username, pin }),
+    }
+  );
+}
+
+export async function adminDeleteUser(adminPin: string, userId: number) {
+  return apiFetch<{ success: boolean; message: string }>(
+    `/admin/users/${userId}?adminPin=${encodeURIComponent(adminPin)}`,
+    { method: "DELETE" }
+  );
+}
+
+export async function adminUserResults(adminPin: string, userId: number) {
+  return apiFetch<{
+    user: { id: number; username: string };
+    attempts: Array<{
+      attemptId: number;
+      quizId: number;
+      quizTitle: string;
+      timeLimit: number;
+      score: number;
+      status: string;
+      tabSwitches: number;
+      startedAt: string;
+      answers: Array<{
+        questionId: number;
+        questionText: string;
+        options: string[];
+        correctAnswer: number;
+        selectedOption: number;
+        isCorrect: boolean;
+      }>;
+    }>;
+  }>(`/admin/users/${userId}/results?adminPin=${encodeURIComponent(adminPin)}`);
+}
+
 export async function getDashboard(token: string) {
   return apiFetch<{
     user: { id: number; username: string };
