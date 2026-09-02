@@ -1,16 +1,18 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, use, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { submitAnswer, finishQuiz, getQuizQuestions, getQuizInfo, reportTabSwitch } from "@/lib/api";
+import { finishQuiz, getQuizQuestions, getQuizInfo } from "@/lib/api";
 import Timer from "@/components/Timer";
 
 interface Question {
   id: number;
   text: string;
   options: string[];
-  correctAnswer: number;
 }
+
+const COOLDOWN_SECONDS = 5;
+const STORAGE_KEY_PREFIX = "quizshield_quiz_";
 
 export default function QuizPage({
   params,
@@ -33,12 +35,66 @@ export default function QuizPage({
   const [quizTitle, setQuizTitle] = useState("");
   const [showWarning, setShowWarning] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
+  const [cooldown, setCooldown] = useState(0);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [result, setResult] = useState<{
     score: number;
     correctCount: number;
     totalQuestions: number;
   } | null>(null);
 
+  // ─── LOCALSTORAGE HELPERS ───
+  const storageKey = `${STORAGE_KEY_PREFIX}${quizId}`;
+
+  function saveToStorage(data: {
+    answers: Record<number, number>;
+    currentIndex: number;
+    tabSwitchCount: number;
+    timeRemaining: number;
+  }) {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(data));
+    } catch {}
+  }
+
+  function loadFromStorage() {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return null;
+      return JSON.parse(raw) as {
+        answers: Record<number, number>;
+        currentIndex: number;
+        tabSwitchCount: number;
+        timeRemaining: number;
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function clearStorage() {
+    try {
+      localStorage.removeItem(storageKey);
+    } catch {}
+  }
+
+  // ─── BUILD BATCH ANSWERS ARRAY ───
+  function buildBatchAnswers(): Array<{ questionId: number; selectedOption: number }> {
+    const batch: Array<{ questionId: number; selectedOption: number }> = [];
+    for (const [qIndex, optionIndex] of Object.entries(answers)) {
+      const qIdx = Number(qIndex);
+      if (questions[qIdx]) {
+        // optionIndex is 0-based, backend expects 1-based
+        batch.push({
+          questionId: questions[qIdx].id,
+          selectedOption: optionIndex + 1,
+        });
+      }
+    }
+    return batch;
+  }
+
+  // ─── LOAD QUIZ ───
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -59,9 +115,19 @@ export default function QuizPage({
         getQuizQuestions(token, quizId),
       ]);
       setTimeLimit(quizInfo.timeLimit);
-      setTimeRemaining(quizInfo.timeLimit);
       setQuestions(quizQuestions);
       setQuizTitle(quizInfo.title);
+
+      // Restore from localStorage if available
+      const saved = loadFromStorage();
+      if (saved && saved.timeRemaining > 0) {
+        setAnswers(saved.answers);
+        setCurrentIndex(saved.currentIndex);
+        setTabSwitchCount(saved.tabSwitchCount);
+        setTimeRemaining(saved.timeRemaining);
+      } else {
+        setTimeRemaining(quizInfo.timeLimit);
+      }
     } catch (err) {
       console.error("Failed to load quiz", err);
       router.push("/dashboard");
@@ -70,7 +136,7 @@ export default function QuizPage({
     }
   }
 
-  // ─── ANTI-CHEAT: GRACE PERIOD TAB SWITCH HANDLER ───
+  // ─── ANTI-CHEAT: TAB SWITCH HANDLER (LOCAL ONLY) ───
   useEffect(() => {
     function handleVisibilityChange() {
       if (document.hidden && !submitted && !locked) {
@@ -81,28 +147,23 @@ export default function QuizPage({
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [submitted, locked, tabSwitchCount]);
 
-  async function handleTabSwitch() {
-    const token = localStorage.getItem("token");
-    if (!token || submitted || locked) return;
+  function handleTabSwitch() {
+    if (submitted || locked) return;
 
-    try {
-      const res = await reportTabSwitch(token, quizId);
-      setTabSwitchCount(res.tabSwitches);
+    const newCount = tabSwitchCount + 1;
+    setTabSwitchCount(newCount);
 
-      if (res.shouldAutoSubmit) {
-        // 2nd switch: auto-submit immediately
-        setShowWarning(false);
-        await handleAutoSubmit();
-      } else {
-        // 1st switch: show warning
-        setShowWarning(true);
-      }
-    } catch (err) {
-      console.error("Tab switch report failed", err);
+    if (newCount >= 2) {
+      // 2nd switch: auto-submit immediately
+      setShowWarning(false);
+      handleAutoSubmit();
+    } else {
+      // 1st switch: show warning
+      setShowWarning(true);
     }
   }
 
-  // Timer countdown
+  // ─── TIMER COUNTDOWN ───
   useEffect(() => {
     if (timeRemaining <= 0 || locked) return;
     const interval = setInterval(() => {
@@ -118,6 +179,34 @@ export default function QuizPage({
     return () => clearInterval(interval);
   }, [locked, submitted]);
 
+  // ─── COOLDOWN TIMER ───
+  useEffect(() => {
+    if (cooldown <= 0) {
+      if (cooldownRef.current) {
+        clearInterval(cooldownRef.current);
+        cooldownRef.current = null;
+      }
+      return;
+    }
+    cooldownRef.current = setInterval(() => {
+      setCooldown((prev) => {
+        if (prev <= 1) {
+          if (cooldownRef.current) clearInterval(cooldownRef.current);
+          cooldownRef.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => {
+      if (cooldownRef.current) {
+        clearInterval(cooldownRef.current);
+        cooldownRef.current = null;
+      }
+    };
+  }, [cooldown > 0]);
+
+  // ─── AUTO-SUBMIT (TAB SWITCH x2 or TIMER EXPIRY) ───
   async function handleAutoSubmit() {
     if (submitted || locked) return;
     setSubmitting(true);
@@ -125,15 +214,8 @@ export default function QuizPage({
     const token = localStorage.getItem("token");
     if (!token) return;
     try {
-      if (answers[currentIndex] !== undefined && questions[currentIndex]) {
-        await submitAnswer(
-          token,
-          quizId,
-          questions[currentIndex].id,
-          answers[currentIndex]
-        ).catch(() => {});
-      }
-      const res = await finishQuiz(token, quizId);
+      const batchAnswers = buildBatchAnswers();
+      const res = await finishQuiz(token, quizId, batchAnswers, tabSwitchCount);
       setResult({
         score: res.score,
         correctCount: res.correctCount,
@@ -141,6 +223,7 @@ export default function QuizPage({
       });
       setSubmitted(true);
       setLocked(true);
+      clearStorage();
     } catch (err) {
       console.error("Auto-submit error", err);
     } finally {
@@ -148,45 +231,35 @@ export default function QuizPage({
     }
   }
 
-  async function handleNext() {
-    const token = localStorage.getItem("token");
-    if (!token) return;
-
-    if (answers[currentIndex] !== undefined && questions[currentIndex]) {
-      try {
-        await submitAnswer(
-          token,
-          quizId,
-          questions[currentIndex].id,
-          answers[currentIndex]
-        );
-      } catch (err) {
-        console.error("Failed to save answer", err);
-      }
-    }
+  // ─── NEXT QUESTION (NO API CALL — LOCAL ONLY) ───
+  function handleNext() {
+    if (cooldown > 0) return;
 
     if (currentIndex >= questions.length - 1) {
-      await handleFinish();
+      handleFinish();
       return;
     }
 
-    setCurrentIndex((prev) => prev + 1);
+    // Save current progress to localStorage
+    const nextIndex = currentIndex + 1;
+    setCurrentIndex(nextIndex);
+    setCooldown(COOLDOWN_SECONDS);
+    saveToStorage({
+      answers,
+      currentIndex: nextIndex,
+      tabSwitchCount,
+      timeRemaining,
+    });
   }
 
+  // ─── FINISH (BATCH SUBMIT ALL ANSWERS) ───
   async function handleFinish() {
     const token = localStorage.getItem("token");
     if (!token) return;
     setSubmitting(true);
     try {
-      if (answers[currentIndex] !== undefined && questions[currentIndex]) {
-        await submitAnswer(
-          token,
-          quizId,
-          questions[currentIndex].id,
-          answers[currentIndex]
-        ).catch(() => {});
-      }
-      const res = await finishQuiz(token, quizId);
+      const batchAnswers = buildBatchAnswers();
+      const res = await finishQuiz(token, quizId, batchAnswers, tabSwitchCount);
       setResult({
         score: res.score,
         correctCount: res.correctCount,
@@ -194,6 +267,7 @@ export default function QuizPage({
       });
       setSubmitted(true);
       setLocked(true);
+      clearStorage();
     } catch (err) {
       console.error("Finish error", err);
     } finally {
@@ -201,9 +275,18 @@ export default function QuizPage({
     }
   }
 
+  // ─── SELECT OPTION (LOCAL ONLY) ───
   function handleSelectOption(optionIndex: number) {
     if (locked) return;
-    setAnswers((prev) => ({ ...prev, [currentIndex]: optionIndex }));
+    const newAnswers = { ...answers, [currentIndex]: optionIndex };
+    setAnswers(newAnswers);
+    // Persist to localStorage on every selection
+    saveToStorage({
+      answers: newAnswers,
+      currentIndex,
+      tabSwitchCount,
+      timeRemaining,
+    });
   }
 
   const currentQuestion = questions[currentIndex];
@@ -359,7 +442,7 @@ export default function QuizPage({
             <Timer timeLimit={timeLimit} initialRemaining={timeRemaining} />
             <button
               onClick={() => {
-                if (confirm("Are you sure you want to exit? Your progress on unanswered questions will be lost.")) {
+                if (confirm("Are you sure you want to exit? Your selected answers will still be submitted.")) {
                   handleFinish();
                 }
               }}
@@ -440,7 +523,7 @@ export default function QuizPage({
           <div className="mt-8 flex justify-end">
             <button
               onClick={handleNext}
-              disabled={!answered || submitting || locked}
+              disabled={!answered || submitting || locked || cooldown > 0}
               className="group inline-flex items-center gap-2 px-8 py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-sm font-bold shadow-md shadow-emerald-500/25 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
             >
               {submitting ? (
@@ -450,6 +533,13 @@ export default function QuizPage({
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                   Submitting...
+                </>
+              ) : cooldown > 0 ? (
+                <>
+                  Next ({cooldown}s)
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
                 </>
               ) : isLastQuestion ? (
                 <>

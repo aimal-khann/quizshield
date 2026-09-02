@@ -83,7 +83,12 @@ export async function reportTabSwitch(token: string, quizId: number) {
   });
 }
 
-export async function finishQuiz(token: string, quizId: number) {
+export async function finishQuiz(
+  token: string,
+  quizId: number,
+  answers?: Array<{ questionId: number; selectedOption: number }>,
+  tabSwitches?: number
+) {
   return apiFetch<{
     score: number;
     correctCount: number;
@@ -92,6 +97,7 @@ export async function finishQuiz(token: string, quizId: number) {
   }>(`/quiz/${quizId}/finish`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ answers, tabSwitches }),
   });
 }
 
@@ -101,7 +107,6 @@ export async function getQuizQuestions(token: string, quizId: number) {
       id: number;
       text: string;
       options: string[];
-      correctAnswer: number;
     }>
   >(`/quiz/${quizId}/questions`, {
     headers: { Authorization: `Bearer ${token}` },

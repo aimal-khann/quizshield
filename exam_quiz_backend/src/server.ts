@@ -4,6 +4,7 @@ dotenv.config();
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import helmet from "helmet";
+import compression from "compression";
 import jwt from "jsonwebtoken";
 import prisma from "./prisma";
 import {
@@ -50,6 +51,12 @@ app.use(helmet({
   hsts: isProduction ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
 }));
 
+// 2. Gzip compression — reduces response size by ~70%
+app.use(compression({
+  threshold: 1024,
+  level: 6,
+}));
+
 // 2. Extra custom headers
 app.use(extraSecurityHeaders);
 
@@ -92,6 +99,14 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// HEALTH CHECK (fast, no auth, no rate limit)
+// ═══════════════════════════════════════════════════════════════
+
+app.get("/health", (_req: Request, res: Response) => {
+  res.json({ status: "ok", timestamp: Date.now() });
+});
+
+// ═══════════════════════════════════════════════════════════════
 // AUTH MIDDLEWARE
 // ═══════════════════════════════════════════════════════════════
 
@@ -108,7 +123,7 @@ function authMiddleware(req: Request, res: Response, next: NextFunction) {
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: number };
+    const decoded = jwt.verify(token, JWT_SECRET!) as { userId: number };
     req.body = req.body || {};
     req.body.userId = decoded.userId;
     next();
@@ -207,7 +222,7 @@ app.get("/api/quiz/:quizId/questions", authMiddleware, quizLimiter, async (req: 
 
     const questions = await prisma.question.findMany({
       where: { quizId: Number(quizId) },
-      select: { id: true, text: true, options: true, correctAnswer: true },
+      select: { id: true, text: true, options: true },
       orderBy: { id: "asc" },
     });
     res.json(questions);
@@ -348,31 +363,82 @@ app.post("/api/quiz/:quizId/finish", authMiddleware, quizLimiter, async (req: Re
   try {
     const { quizId } = req.params;
     const userId = req.body.userId!;
+    const { answers: batchAnswers, tabSwitches } = req.body || {};
     const quizIdErr = validateQuizId(quizId);
     if (quizIdErr) return res.status(400).json({ error: quizIdErr });
 
     const attempt = await prisma.attempt.findFirst({
       where: { userId, quizId: Number(quizId), status: "in-progress" },
-      include: { answers: { include: { question: true } } },
     });
     if (!attempt) return res.status(404).json({ error: "No active quiz attempt found" });
     if (attempt.status === "completed") return res.status(400).json({ error: "Quiz already finalized" });
 
     const questions = await prisma.question.findMany({ where: { quizId: Number(quizId) } });
 
-    let correctCount = 0;
-    for (const ans of attempt.answers) {
-      const question = questions.find((q) => q.id === ans.questionId);
-      if (question && ans.selectedOption === question.correctAnswer) correctCount++;
+    // Batch mode: frontend sends all answers at once
+    if (Array.isArray(batchAnswers)) {
+      // Delete any existing answers (from prior partial saves)
+      await prisma.answer.deleteMany({ where: { attemptId: attempt.id } });
+
+      // Batch insert all answers
+      const validAnswers = batchAnswers
+        .filter((a: any) => a.questionId && a.selectedOption >= 1 && a.selectedOption <= 4)
+        .map((a: any) => ({
+          attemptId: attempt.id,
+          questionId: Number(a.questionId),
+          selectedOption: Number(a.selectedOption),
+        }));
+
+      if (validAnswers.length > 0) {
+        await prisma.answer.createMany({ data: validAnswers });
+      }
+
+      // Update tab switches if provided
+      if (typeof tabSwitches === "number" && tabSwitches > 0) {
+        await prisma.attempt.update({
+          where: { id: attempt.id },
+          data: { tabSwitches: Math.min(tabSwitches, 100) },
+        });
+      }
+
+      // Reload answers with questions for scoring
+      const savedAnswers = await prisma.answer.findMany({
+        where: { attemptId: attempt.id },
+        include: { question: true },
+      });
+
+      let correctCount = 0;
+      for (const ans of savedAnswers) {
+        if (ans.selectedOption === ans.question.correctAnswer) correctCount++;
+      }
+
+      const score = questions.length > 0 ? (correctCount / questions.length) * 100 : 0;
+      const status = score >= 75 ? "passed" : "not-passed";
+
+      await prisma.attempt.update({ where: { id: attempt.id }, data: { score, status } });
+
+      logSecurity("QUIZ_FINISHED", `User ${userId} quiz ${quizId} score=${score.toFixed(1)}% ${status} (batch)`, "", req);
+      res.json({ score, correctCount, totalQuestions: questions.length, status });
+    } else {
+      // Legacy mode: answers already saved individually during quiz
+      const existingAnswers = await prisma.answer.findMany({
+        where: { attemptId: attempt.id },
+        include: { question: true },
+      });
+
+      let correctCount = 0;
+      for (const ans of existingAnswers) {
+        if (ans.selectedOption === ans.question.correctAnswer) correctCount++;
+      }
+
+      const score = questions.length > 0 ? (correctCount / questions.length) * 100 : 0;
+      const status = score >= 75 ? "passed" : "not-passed";
+
+      await prisma.attempt.update({ where: { id: attempt.id }, data: { score, status } });
+
+      logSecurity("QUIZ_FINISHED", `User ${userId} quiz ${quizId} score=${score.toFixed(1)}% ${status}`, "", req);
+      res.json({ score, correctCount, totalQuestions: questions.length, status });
     }
-
-    const score = questions.length > 0 ? (correctCount / questions.length) * 100 : 0;
-    const status = score >= 75 ? "passed" : "not-passed";
-
-    await prisma.attempt.update({ where: { id: attempt.id }, data: { score, status } });
-
-    logSecurity("QUIZ_FINISHED", `User ${userId} quiz ${quizId} score=${score.toFixed(1)}% ${status}`, "", req);
-    res.json({ score, correctCount, totalQuestions: questions.length, status });
   } catch (error) {
     console.error("Finalize quiz error:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -991,4 +1057,18 @@ const PORT = Number(process.env.PORT) || 7860;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
   logSecurity("SERVER_START", `Port ${PORT}`);
+
+  // Keep alive: ping self every 10 minutes to prevent Railway free tier spin-down
+  if (isProduction) {
+    const HOST = process.env.RAILWAY_PUBLIC_DOMAIN || `localhost:${PORT}`;
+    const url = `http://${HOST}/health`;
+    setInterval(async () => {
+      try {
+        await fetch(url);
+        console.log("[KEEPALIVE] Self-ping OK");
+      } catch {
+        console.warn("[KEEPALIVE] Self-ping failed");
+      }
+    }, 10 * 60 * 1000);
+  }
 });
