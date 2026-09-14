@@ -9,8 +9,13 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Exam Quiz Platform",
-  description: "Secure anti-cheat quiz platform for study groups",
+  title: "QuizShield | Community Examination Platform",
+  description: "Secure community anti-cheat examination and quiz platform",
+  icons: {
+    icon: "/quizshield_logo.png",
+    shortcut: "/quizshield_logo.png",
+    apple: "/quizshield_logo.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

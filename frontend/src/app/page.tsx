@@ -7,13 +7,13 @@ export default function HomePage() {
       <nav className="fixed top-0 left-0 right-0 z-50 glass border-b border-white/30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sage-500 to-emerald-600 flex items-center justify-center shadow-md shadow-sage-500/20">
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-              </svg>
-            </div>
+            <img
+              src="/quizshield_logo.png"
+              alt="QuizShield Logo"
+              className="w-9 h-9 rounded-xl object-cover shadow-md shadow-emerald-500/20"
+            />
             <span className="text-lg font-bold bg-gradient-to-r from-emerald-700 to-teal-700 bg-clip-text text-transparent">
-              Exam Quiz
+              QuizShield
             </span>
           </div>
           <Link
@@ -118,37 +118,114 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ─── STATS BAR ─── */}
-      <section className="relative bg-white py-10">
+      {/* ─── LIVE INTEGRITY & DEFENSE PROTOCOLS BAR ─── */}
+      <section className="relative bg-gradient-to-b from-white via-slate-50/50 to-white py-12 border-b border-slate-100">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-3 gap-6">
-            <div className="text-center p-6 rounded-2xl bg-gradient-to-br from-sage-50 to-emerald-50/50 border border-sage-100/50">
-              <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-sage-100 mb-3">
-                <svg className="w-5 h-5 text-sage-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-              </div>
-              <p className="text-3xl font-extrabold bg-gradient-to-r from-emerald-700 to-teal-600 bg-clip-text text-transparent">5</p>
-              <p className="text-sm text-slate-500 mt-1 font-medium">Active Students</p>
+          
+          {/* Live System Indicator Badge */}
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-8 pb-4 border-b border-slate-200/60">
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+              </span>
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Examination Defense Engine: <span className="text-emerald-600">Active &amp; Monitoring</span>
+              </span>
             </div>
-            <div className="text-center p-6 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50/50 border border-blue-100/50">
-              <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-blue-100 mb-3">
-                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                </svg>
-              </div>
-              <p className="text-3xl font-extrabold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">100%</p>
-              <p className="text-sm text-slate-500 mt-1 font-medium">Anti-Cheat Protected</p>
+            <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/60 font-semibold">
+                🔒 Strict 1-Attempt Lock
+              </span>
+              <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 font-semibold">
+                ⚡ Gmail Instant PIN
+              </span>
+              <span className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200/60 font-semibold">
+                ⚖️ 2nd Chance Appeal System
+              </span>
             </div>
-            <div className="text-center p-6 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50/50 border border-purple-100/50">
-              <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-purple-100 mb-3">
-                <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
+          </div>
+
+          {/* 4 Interactive Capability Pillars */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            
+            {/* Card 1 — Unlimited Question Bank */}
+            <div className="group relative p-6 rounded-2xl bg-white border border-slate-200/80 shadow-sm hover:shadow-xl hover:shadow-emerald-500/10 hover:border-emerald-300 transition-all duration-300 hover:-translate-y-1">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-md shadow-emerald-500/20 group-hover:scale-110 transition-transform">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                  </svg>
+                </div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                  Scalable
+                </span>
               </div>
-              <p className="text-3xl font-extrabold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">75%</p>
-              <p className="text-sm text-slate-500 mt-1 font-medium">Passing Threshold</p>
+              <p className="text-3xl font-extrabold text-slate-900 tracking-tight">Unlimited</p>
+              <h3 className="text-sm font-bold text-slate-700 mt-1">Chapter Topic MCQs</h3>
+              <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                Modular question pools across all examination chapters with randomized options and instant scoring.
+              </p>
             </div>
+
+            {/* Card 2 — Gmail PIN */}
+            <div className="group relative p-6 rounded-2xl bg-white border border-slate-200/80 shadow-sm hover:shadow-xl hover:shadow-blue-500/10 hover:border-blue-300 transition-all duration-300 hover:-translate-y-1">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:scale-110 transition-transform">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
+                  Automated
+                </span>
+              </div>
+              <p className="text-3xl font-extrabold text-slate-900 tracking-tight">5-Digit PIN</p>
+              <h3 className="text-sm font-bold text-slate-700 mt-1">Instant Gmail Verification</h3>
+              <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                Random bcrypt-hashed PIN keycards delivered directly to Gmail. Zero password fatigue.
+              </p>
+            </div>
+
+            {/* Card 3 — Tab-Switch & Anti-Cheat */}
+            <div className="group relative p-6 rounded-2xl bg-white border border-slate-200/80 shadow-sm hover:shadow-xl hover:shadow-purple-500/10 hover:border-purple-300 transition-all duration-300 hover:-translate-y-1">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center text-white shadow-md shadow-purple-500/20 group-hover:scale-110 transition-transform">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                </div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full">
+                  Active Guard
+                </span>
+              </div>
+              <p className="text-3xl font-extrabold text-slate-900 tracking-tight">Real-Time</p>
+              <h3 className="text-sm font-bold text-slate-700 mt-1">Tab &amp; Focus Sentinel</h3>
+              <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                Monitors window focus and tab switches with live violation warnings and auto-submission.
+              </p>
+            </div>
+
+            {/* Card 4 — 2nd Chance Appeal */}
+            <div className="group relative p-6 rounded-2xl bg-white border border-slate-200/80 shadow-sm hover:shadow-xl hover:shadow-amber-500/10 hover:border-amber-300 transition-all duration-300 hover:-translate-y-1">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-md shadow-amber-500/20 group-hover:scale-110 transition-transform">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
+                  </svg>
+                </div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                  Fairness
+                </span>
+              </div>
+              <p className="text-3xl font-extrabold text-slate-900 tracking-tight">2nd Chance</p>
+              <h3 className="text-sm font-bold text-slate-700 mt-1">Dispute Resolution</h3>
+              <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                1-click appeal requests with issue categorization and administrative attempt clearing.
+              </p>
+            </div>
+
           </div>
         </div>
       </section>
@@ -339,13 +416,13 @@ export default function HomePage() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-sage-500 to-emerald-600 flex items-center justify-center shadow-sm">
-                <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                </svg>
-              </div>
+              <img
+                src="/quizshield_logo.png"
+                alt="QuizShield Logo"
+                className="w-7 h-7 rounded-lg object-cover shadow-sm"
+              />
               <span className="text-sm font-bold bg-gradient-to-r from-emerald-700 to-teal-700 bg-clip-text text-transparent">
-                Exam Quiz Platform
+                QuizShield Platform
               </span>
             </div>
             <p className="text-xs text-slate-400 font-medium">

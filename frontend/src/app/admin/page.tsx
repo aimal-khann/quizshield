@@ -7,6 +7,7 @@ import {
   adminResetAttempt,
   adminListQuizzes,
   adminCreateQuiz,
+  adminUpdateQuiz,
   adminDeleteQuiz,
   adminListQuestions,
   adminAddQuestion,
@@ -15,8 +16,13 @@ import {
   adminUpdateQuestion,
   adminListUsers,
   adminCreateUser,
+  adminUpdateUser,
   adminDeleteUser,
   adminUserResults,
+  adminListRetakeRequests,
+  adminApproveRetake,
+  adminDeclineRetake,
+  AdminRetakeRequestItem,
 } from "@/lib/api";
 
 // ─── TYPES ───────────────────────────────────────────────
@@ -49,6 +55,9 @@ interface Question {
 interface User {
   id: number;
   username: string;
+  email?: string;
+  createdAt?: string;
+  pin?: string;
   attemptCount: number;
   attempts: Array<{
     attemptId: number;
@@ -83,7 +92,7 @@ interface UserResults {
   }>;
 }
 
-type Tab = "attempts" | "quizzes" | "users";
+type Tab = "attempts" | "requests" | "quizzes" | "users";
 
 // ─── ICONS ───────────────────────────────────────────────
 const Icons = {
@@ -227,6 +236,7 @@ export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [newUsername, setNewUsername] = useState("");
+  const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserPin, setNewUserPin] = useState("");
   const [creatingUser, setCreatingUser] = useState(false);
   const [deletingUser, setDeletingUser] = useState<number | null>(null);
@@ -234,6 +244,26 @@ export default function AdminPage() {
   const [userResults, setUserResults] = useState<UserResults | null>(null);
   const [resultsLoading, setResultsLoading] = useState(false);
   const [userFilter, setUserFilter] = useState("");
+
+  // RETAKE / 2ND CHANCE APPEALS
+  const [retakeRequests, setRetakeRequests] = useState<AdminRetakeRequestItem[]>([]);
+  const [retakeLoading, setRetakeLoading] = useState(false);
+  const [approvingId, setApprovingId] = useState<number | null>(null);
+  const [decliningId, setDecliningId] = useState<number | null>(null);
+  const [retakeFilter, setRetakeFilter] = useState("");
+
+  // EDIT QUIZ MODAL
+  const [editingQuiz, setEditingQuiz] = useState<Quiz | null>(null);
+  const [editQuizTitle, setEditQuizTitle] = useState("");
+  const [editQuizTimeLimit, setEditQuizTimeLimit] = useState(30);
+  const [savingQuiz, setSavingQuiz] = useState(false);
+
+  // EDIT USER MODAL
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editUsername, setEditUsername] = useState("");
+  const [editUserEmail, setEditUserEmail] = useState("");
+  const [editUserPin, setEditUserPin] = useState("");
+  const [savingUser, setSavingUser] = useState(false);
 
   // ─── AUTH ─────────────────────────────────────────────
   async function handleLogin(e: React.FormEvent) {
@@ -269,12 +299,64 @@ export default function AdminPage() {
     finally { setUsersLoading(false); }
   }, [adminPin]);
 
+  const loadRetakeRequests = useCallback(async () => {
+    setRetakeLoading(true);
+    try {
+      const data = await adminListRetakeRequests(adminPin);
+      setRetakeRequests(data);
+    } catch {
+      setMessage({ type: "error", text: "Failed to load 2nd chance requests" });
+    } finally {
+      setRetakeLoading(false);
+    }
+  }, [adminPin]);
+
   useEffect(() => {
     if (!authenticated) return;
+    loadRetakeRequests(); // always load for badge
     if (tab === "attempts") loadAttempts();
     if (tab === "quizzes") loadQuizzes();
     if (tab === "users") loadUsers();
-  }, [authenticated, tab, loadQuizzes, loadUsers]);
+    if (tab === "requests") loadRetakeRequests();
+  }, [authenticated, tab, loadQuizzes, loadUsers, loadRetakeRequests]);
+
+  // ─── RETAKE ACTIONS ───────────────────────────────────
+  async function handleApproveRetake(requestId: number, username: string, quizTitle: string) {
+    if (
+      !confirm(
+        `Approve 2nd chance for "${username}" on "${quizTitle}"?\n\nThis will clear their previous attempt lock and dispatch an approval email to the student.`
+      )
+    )
+      return;
+    setApprovingId(requestId);
+    setMessage(null);
+    try {
+      const res = await adminApproveRetake(adminPin, requestId);
+      setMessage({ type: "success", text: res.message });
+      await loadRetakeRequests();
+      await loadAttempts();
+    } catch (err: any) {
+      setMessage({ type: "error", text: err.message || "Failed to approve 2nd chance request" });
+    } finally {
+      setApprovingId(null);
+    }
+  }
+
+  async function handleDeclineRetake(requestId: number, username: string) {
+    const note = prompt(`Optional explanation or feedback for declining ${username}'s appeal:`);
+    if (note === null) return;
+    setDecliningId(requestId);
+    setMessage(null);
+    try {
+      const res = await adminDeclineRetake(adminPin, requestId, note || undefined);
+      setMessage({ type: "success", text: res.message });
+      await loadRetakeRequests();
+    } catch (err: any) {
+      setMessage({ type: "error", text: err.message || "Failed to decline 2nd chance request" });
+    } finally {
+      setDecliningId(null);
+    }
+  }
 
   // ─── ATTEMPTS ─────────────────────────────────────────
   async function handleReset(username: string, quizId: number) {
@@ -301,7 +383,7 @@ export default function AdminPage() {
     setCreatingQuiz(true);
     setMessage(null);
     try {
-      await adminCreateQuiz(adminPin, newTitle.trim(), newTimeLimit);
+      await adminCreateQuiz(adminPin, newTitle.trim(), newTimeLimit * 60);
       setMessage({ type: "success", text: `Quiz "${newTitle.trim()}" created!` });
       setNewTitle(""); setNewTimeLimit(30);
       loadQuizzes();
@@ -319,6 +401,32 @@ export default function AdminPage() {
       loadQuizzes();
     } catch (err: any) { setMessage({ type: "error", text: err.message }); }
     finally { setDeletingQuiz(null); }
+  }
+
+  function startEditQuiz(quiz: Quiz) {
+    setEditingQuiz(quiz);
+    setEditQuizTitle(quiz.title);
+    setEditQuizTimeLimit(Math.round(quiz.timeLimit >= 60 ? quiz.timeLimit / 60 : quiz.timeLimit));
+  }
+
+  async function handleUpdateQuiz(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingQuiz || !editQuizTitle.trim()) return;
+    setSavingQuiz(true);
+    setMessage(null);
+    try {
+      await adminUpdateQuiz(adminPin, editingQuiz.id, {
+        title: editQuizTitle.trim(),
+        timeLimit: editQuizTimeLimit * 60,
+      });
+      setMessage({ type: "success", text: `Quiz "${editQuizTitle.trim()}" updated!` });
+      setEditingQuiz(null);
+      loadQuizzes();
+    } catch (err: any) {
+      setMessage({ type: "error", text: err.message });
+    } finally {
+      setSavingQuiz(false);
+    }
   }
 
   // ─── QUESTIONS ────────────────────────────────────────
@@ -414,9 +522,9 @@ export default function AdminPage() {
     if (!newUsername.trim() || !newUserPin.trim()) return;
     setCreatingUser(true);
     try {
-      await adminCreateUser(adminPin, newUsername.trim(), newUserPin.trim());
+      await adminCreateUser(adminPin, newUsername.trim(), newUserPin.trim(), newUserEmail.trim() || undefined);
       setMessage({ type: "success", text: `User "${newUsername.trim()}" created!` });
-      setNewUsername(""); setNewUserPin(""); loadUsers();
+      setNewUsername(""); setNewUserEmail(""); setNewUserPin(""); loadUsers();
     } catch (err: any) { setMessage({ type: "error", text: err.message }); }
     finally { setCreatingUser(false); }
   }
@@ -431,6 +539,47 @@ export default function AdminPage() {
       loadUsers();
     } catch (err: any) { setMessage({ type: "error", text: err.message }); }
     finally { setDeletingUser(null); }
+  }
+
+  function startEditUser(user: User) {
+    setEditingUser(user);
+    setEditUsername(user.username);
+    setEditUserEmail(user.email || "");
+    setEditUserPin("");
+  }
+
+  async function handleUpdateUser(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingUser || !editUsername.trim()) return;
+    setSavingUser(true);
+    setMessage(null);
+    try {
+      const data: { username?: string; email?: string; pin?: string } = {};
+      if (editUsername.trim() !== editingUser.username) {
+        data.username = editUsername.trim();
+      }
+      if (editUserEmail.trim() && editUserEmail.trim() !== editingUser.email) {
+        data.email = editUserEmail.trim();
+      }
+      if (editUserPin.trim()) {
+        if (editUserPin.trim().length !== 5) {
+          setMessage({ type: "error", text: "PIN must be exactly 5 digits" });
+          setSavingUser(false);
+          return;
+        }
+        data.pin = editUserPin.trim();
+      }
+      if (Object.keys(data).length === 0) {
+        setEditingUser(null);
+        setSavingUser(false);
+        return;
+      }
+      await adminUpdateUser(adminPin, editingUser.id, data);
+      setMessage({ type: "success", text: "User updated!" });
+      setEditingUser(null);
+      loadUsers();
+    } catch (err: any) { setMessage({ type: "error", text: err.message }); }
+    finally { setSavingUser(false); }
   }
 
   async function loadUserResults(user: User) {
@@ -460,11 +609,11 @@ export default function AdminPage() {
 
         <div className="w-full max-w-md relative">
           <div className="text-center mb-10">
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-emerald-500/30 rotate-3 hover:rotate-0 transition-transform">
-              <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-              </svg>
-            </div>
+            <img
+              src="/quizshield_logo.png"
+              alt="QuizShield Logo"
+              className="w-20 h-20 rounded-2xl object-cover mx-auto mb-6 shadow-2xl shadow-emerald-500/30 rotate-3 hover:rotate-0 transition-transform"
+            />
             <h1 className="text-3xl font-extrabold text-white tracking-tight">QuizShield</h1>
             <p className="text-slate-400 mt-2 text-sm">Admin Control Panel</p>
           </div>
@@ -530,11 +679,11 @@ export default function AdminPage() {
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-slate-200/60">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-              </svg>
-            </div>
+            <img
+              src="/quizshield_logo.png"
+              alt="QuizShield Logo"
+              className="w-9 h-9 rounded-xl object-cover shadow-lg shadow-emerald-500/20"
+            />
             <div>
               <h1 className="text-base font-extrabold text-slate-800 tracking-tight">QuizShield</h1>
               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Admin Panel</p>
@@ -590,21 +739,35 @@ export default function AdminPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-1 bg-white rounded-xl border border-slate-200 p-1 shadow-sm w-fit">
-          {([["attempts", "Assessments", Icons.clipboard], ["quizzes", "Quizzes", Icons.quiz], ["users", "Users", Icons.users]] as const).map(([key, label, icon]) => (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${
-                tab === key
-                  ? "bg-slate-900 text-white shadow-md"
-                  : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
-              }`}
-            >
-              {icon}
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center gap-1 bg-white rounded-xl border border-slate-200 p-1 shadow-sm w-fit flex-wrap">
+          {([
+            ["attempts", "Assessments", Icons.clipboard],
+            ["requests", "2nd Chance Appeals", Icons.refresh],
+            ["quizzes", "Quizzes", Icons.quiz],
+            ["users", "Users", Icons.users],
+          ] as const).map(([key, label, icon]) => {
+            const isReq = key === "requests";
+            const pendingCount = retakeRequests.filter((r) => r.status === "pending").length;
+            return (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${
+                  tab === key
+                    ? "bg-slate-900 text-white shadow-md"
+                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                {icon}
+                <span>{label}</span>
+                {isReq && pendingCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-amber-500 text-white animate-pulse">
+                    {pendingCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {/* ═══════ ATTEMPTS TAB ═══════ */}
@@ -715,6 +878,200 @@ export default function AdminPage() {
           </div>
         )}
 
+        {/* ═══════ 2ND CHANCE APPEALS TAB ═══════ */}
+        {tab === "requests" && (
+          <div className="space-y-5">
+            {/* Header & Filter */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-extrabold text-slate-800">2nd Chance Retake Appeals</h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Review student appeals for quiz retakes. Approving clears their attempt record and emails confirmation.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">{Icons.search}</div>
+                  <input
+                    type="text"
+                    value={retakeFilter}
+                    onChange={(e) => setRetakeFilter(e.target.value)}
+                    placeholder="Search appeals..."
+                    className="pl-10 pr-4 py-2.5 rounded-xl bg-white border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 w-64"
+                  />
+                </div>
+                <button
+                  onClick={loadRetakeRequests}
+                  className="p-2.5 rounded-xl bg-white border border-slate-200 text-slate-500 hover:text-emerald-600 hover:border-emerald-300 transition-all"
+                  title="Refresh"
+                >
+                  {Icons.refresh}
+                </button>
+              </div>
+            </div>
+
+            {/* Requests List */}
+            {retakeLoading ? (
+              <div className="p-16 bg-white rounded-2xl border border-slate-200 text-center">
+                <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto" />
+              </div>
+            ) : retakeRequests.filter(
+                (r) =>
+                  r.username.toLowerCase().includes(retakeFilter.toLowerCase()) ||
+                  r.userEmail.toLowerCase().includes(retakeFilter.toLowerCase()) ||
+                  r.quizTitle.toLowerCase().includes(retakeFilter.toLowerCase()) ||
+                  r.reason.toLowerCase().includes(retakeFilter.toLowerCase())
+              ).length === 0 ? (
+              <div className="p-16 bg-white rounded-2xl border border-slate-200 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3 text-2xl">
+                  📬
+                </div>
+                <h3 className="text-base font-bold text-slate-700">No appeals in inbox</h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Students who experience connection issues or disturbances will appear here when requesting a 2nd chance.
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                {retakeRequests
+                  .filter(
+                    (r) =>
+                      r.username.toLowerCase().includes(retakeFilter.toLowerCase()) ||
+                      r.userEmail.toLowerCase().includes(retakeFilter.toLowerCase()) ||
+                      r.quizTitle.toLowerCase().includes(retakeFilter.toLowerCase()) ||
+                      r.reason.toLowerCase().includes(retakeFilter.toLowerCase())
+                  )
+                  .map((item) => {
+                    const isPending = item.status === "pending";
+                    const isApproved = item.status === "approved";
+                    const isDeclined = item.status === "declined";
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={`bg-white rounded-2xl border transition-all p-6 ${
+                          isPending
+                            ? "border-amber-200 shadow-md shadow-amber-500/5 ring-1 ring-amber-200/50"
+                            : "border-slate-200 shadow-sm opacity-90"
+                        }`}
+                      >
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+                          {/* Left: Student & Quiz details */}
+                          <div className="flex items-start gap-4 flex-1">
+                            <div
+                              className={`w-12 h-12 rounded-2xl flex items-center justify-center font-extrabold text-sm shrink-0 ${
+                                isPending
+                                  ? "bg-amber-100 text-amber-800"
+                                  : isApproved
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : "bg-rose-100 text-rose-800"
+                              }`}
+                            >
+                              {item.username.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="space-y-1.5 flex-1 min-w-0">
+                              <div className="flex items-center gap-2.5 flex-wrap">
+                                <h3 className="font-extrabold text-slate-900 text-base">{item.username}</h3>
+                                <span className="text-xs text-slate-500 font-mono bg-slate-100 px-2 py-0.5 rounded-md">
+                                  {item.userEmail}
+                                </span>
+                                <span
+                                  className={`px-2.5 py-0.5 rounded-full text-xs font-extrabold uppercase tracking-wide ${
+                                    isPending
+                                      ? "bg-amber-100 text-amber-800 border border-amber-300"
+                                      : isApproved
+                                      ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                      : "bg-rose-100 text-rose-800 border border-rose-200"
+                                  }`}
+                                >
+                                  {item.status}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-3 text-xs text-slate-600 flex-wrap">
+                                <span>
+                                  <strong>Topic:</strong> {item.quizTitle}
+                                </span>
+                                <span>•</span>
+                                <span>
+                                  <strong>Category:</strong>{" "}
+                                  <span className="capitalize bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-medium">
+                                    {item.category}
+                                  </span>
+                                </span>
+                                {item.attempt && (
+                                  <>
+                                    <span>•</span>
+                                    <span>
+                                      <strong>Previous Score:</strong> {Number(item.attempt.score.toFixed(1))}%
+                                    </span>
+                                    <span>•</span>
+                                    <span
+                                      className={
+                                        item.attempt.tabSwitches > 0
+                                          ? "text-rose-600 font-bold"
+                                          : "text-slate-500"
+                                      }
+                                    >
+                                      <strong>Tab Switches:</strong> {item.attempt.tabSwitches}
+                                    </span>
+                                  </>
+                                )}
+                                <span>•</span>
+                                <span className="text-slate-400">
+                                  {new Date(item.createdAt).toLocaleString()}
+                                </span>
+                              </div>
+
+                              {/* Student reason */}
+                              <div className="mt-3 p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-700 italic leading-relaxed">
+                                &ldquo;{item.reason}&rdquo;
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Right: Actions */}
+                          <div className="flex items-center gap-2.5 shrink-0 self-end lg:self-center">
+                            {isPending ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleApproveRetake(item.id, item.username, item.quizTitle)}
+                                  disabled={approvingId === item.id || decliningId === item.id}
+                                  className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs shadow-md shadow-emerald-600/20 hover:shadow-lg hover:-translate-y-0.5 transition-all"
+                                >
+                                  {approvingId === item.id ? (
+                                    "Clearing Attempt..."
+                                  ) : (
+                                    <>
+                                      <span>✓</span> Approve 2nd Chance
+                                    </>
+                                  )}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeclineRetake(item.id, item.username)}
+                                  disabled={approvingId === item.id || decliningId === item.id}
+                                  className="flex items-center gap-1 px-4 py-2.5 rounded-xl border border-rose-200 hover:bg-rose-50 text-rose-700 font-bold text-xs transition-colors"
+                                >
+                                  {decliningId === item.id ? "Declining..." : "Decline"}
+                                </button>
+                              </>
+                            ) : (
+                              <div className="text-right text-xs text-slate-400">
+                                Resolved on {item.resolvedAt ? new Date(item.resolvedAt).toLocaleDateString() : "recently"}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ═══════ QUIZZES TAB ═══════ */}
         {tab === "quizzes" && (
           <div className="space-y-5">
@@ -733,7 +1090,7 @@ export default function AdminPage() {
                 <input type="text" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Quiz title (e.g. Mathematics 101)" className="flex-1 px-4 py-3 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 transition-all" maxLength={100} required />
                 <div className="flex items-center gap-2 bg-slate-50 rounded-xl px-4 border border-slate-200">
                   <span className="text-xs font-bold text-slate-500">⏱</span>
-                  <input type="number" value={newTimeLimit} onChange={(e) => setNewTimeLimit(Number(e.target.value))} min={1} max={300} className="w-16 py-3 bg-transparent text-sm font-bold text-slate-800 focus:outline-none" />
+                  <input type="number" value={newTimeLimit} onChange={(e) => setNewTimeLimit(Number(e.target.value))} min={1} max={180} className="w-20 py-3 bg-transparent text-sm font-bold text-slate-800 focus:outline-none" />
                   <span className="text-xs text-slate-400">min</span>
                 </div>
                 <button type="submit" disabled={creatingQuiz || !newTitle.trim()} className="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold text-sm shadow-md shadow-emerald-500/20 hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50">
@@ -775,12 +1132,15 @@ export default function AdminPage() {
                           <div className="min-w-0">
                             <h3 className="font-bold text-slate-800 truncate">{q.title}</h3>
                             <div className="flex items-center gap-3 mt-1">
-                              <span className="text-xs font-semibold text-slate-400">⏱ {q.timeLimit} min</span>
+                              <span className="text-xs font-semibold text-slate-400">⏱ {q.timeLimit >= 60 ? Math.round(q.timeLimit / 60) : q.timeLimit} min</span>
                               <span className="text-xs font-semibold text-emerald-600">{q.questionCount} question{q.questionCount !== 1 ? "s" : ""}</span>
                             </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
+                          <button onClick={() => startEditQuiz(q)} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all">
+                            {Icons.edit} Edit
+                          </button>
                           <button onClick={() => loadQuestions(q)} className="px-4 py-2 rounded-xl text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200/50 hover:bg-amber-100 transition-all">
                             Manage
                           </button>
@@ -967,8 +1327,9 @@ Answer: C`}
               </div>
               <form onSubmit={handleCreateUser} className="flex flex-col sm:flex-row gap-3">
                 <input type="text" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder="Username" className="flex-1 px-4 py-3 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all" maxLength={50} required />
-                <input type="text" value={newUserPin} onChange={(e) => setNewUserPin(e.target.value)} placeholder="5-digit PIN" className="w-40 px-4 py-3 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all" maxLength={5} pattern="\d{5}" required />
-                <button type="submit" disabled={creatingUser || !newUsername.trim() || !newUserPin.trim()} className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-bold text-sm shadow-md shadow-blue-500/20 hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50">
+                <input type="email" value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} placeholder="Gmail address (optional)" className="flex-1 px-4 py-3 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all" />
+                <input type="text" value={newUserPin} onChange={(e) => setNewUserPin(e.target.value)} placeholder="5-digit PIN" className="w-36 px-4 py-3 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all" maxLength={5} pattern="\d{5}" required />
+                <button type="submit" disabled={creatingUser || !newUsername.trim() || !newUserPin.trim()} className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-bold text-sm shadow-md shadow-blue-500/20 hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 shrink-0">
                   {creatingUser ? "Adding..." : "+ Add User"}
                 </button>
               </form>
@@ -993,14 +1354,14 @@ Answer: C`}
               </div>
               {usersLoading ? (
                 <div className="p-16 text-center"><div className="w-8 h-8 border-2 border-blue-300 border-t-transparent rounded-full animate-spin mx-auto" /></div>
-              ) : users.filter((u) => u.username.toLowerCase().includes(userFilter.toLowerCase())).length === 0 ? (
+              ) : users.filter((u) => u.username.toLowerCase().includes(userFilter.toLowerCase()) || (u.email && u.email.toLowerCase().includes(userFilter.toLowerCase()))).length === 0 ? (
                 <div className="p-20 text-center">
                   <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4 text-slate-400">{Icons.users}</div>
                   <p className="text-sm font-semibold text-slate-500">No users found</p>
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100">
-                  {users.filter((u) => u.username.toLowerCase().includes(userFilter.toLowerCase())).map((u) => {
+                  {users.filter((u) => u.username.toLowerCase().includes(userFilter.toLowerCase()) || (u.email && u.email.toLowerCase().includes(userFilter.toLowerCase()))).map((u) => {
                     const avgScore = u.attempts.length > 0 ? u.attempts.reduce((s, a) => s + a.score, 0) / u.attempts.length : 0;
                     return (
                       <div key={u.id} className="px-6 py-4 hover:bg-slate-50/50 transition-colors group">
@@ -1010,7 +1371,12 @@ Answer: C`}
                               {u.username.charAt(0).toUpperCase()}
                             </div>
                             <div className="min-w-0">
-                              <h3 className="font-bold text-slate-800">{u.username}</h3>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h3 className="font-bold text-slate-800">{u.username}</h3>
+                                {u.email && (
+                                  <span className="text-xs text-slate-400 font-mono">({u.email})</span>
+                                )}
+                              </div>
                               <div className="flex items-center gap-3 mt-1">
                                 <span className="text-xs font-semibold text-slate-400">
                                   {u.attempts.length} attempt{u.attempts.length !== 1 ? "s" : ""}
@@ -1024,6 +1390,9 @@ Answer: C`}
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
+                            <button onClick={() => startEditUser(u)} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all">
+                              {Icons.edit} Edit
+                            </button>
                             <button onClick={() => loadUserResults(u)} className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200/50 hover:bg-blue-100 transition-all">
                               {Icons.eye} Results
                             </button>
@@ -1113,6 +1482,184 @@ Answer: C`}
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ═══════ EDIT QUIZ MODAL ═══════ */}
+        {editingQuiz && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
+            <div className="relative bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-100">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600">
+                    {Icons.edit}
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-800">Edit Quiz</h3>
+                    <p className="text-xs text-slate-400">Update quiz name and time limit</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setEditingQuiz(null)}
+                  className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  {Icons.close}
+                </button>
+              </div>
+              <form onSubmit={handleUpdateQuiz} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Quiz Title
+                  </label>
+                  <input
+                    type="text"
+                    value={editQuizTitle}
+                    onChange={(e) => setEditQuizTitle(e.target.value)}
+                    placeholder="e.g. Mathematics 101"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 transition-all font-medium text-slate-800"
+                    required
+                    maxLength={100}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Time Limit (minutes)
+                  </label>
+                  <div className="flex items-center gap-2 bg-slate-50 rounded-xl px-4 border border-slate-200">
+                    <span className="text-xs font-bold text-slate-500">⏱</span>
+                    <input
+                      type="number"
+                      value={editQuizTimeLimit}
+                      onChange={(e) => setEditQuizTimeLimit(Number(e.target.value))}
+                      min={1}
+                      max={180}
+                      className="w-full py-2.5 bg-transparent text-sm font-bold text-slate-800 focus:outline-none"
+                      required
+                    />
+                    <span className="text-xs text-slate-400">min</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingQuiz(null)}
+                    className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingQuiz || !editQuizTitle.trim()}
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold text-xs shadow-md shadow-amber-500/20 hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {savingQuiz ? (
+                      <>
+                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        Saving...
+                      </>
+                    ) : (
+                      "Save Changes"
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════ EDIT USER MODAL ═══════ */}
+        {editingUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
+            <div className="relative bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-100">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
+                    {Icons.edit}
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-800">Edit User</h3>
+                    <p className="text-xs text-slate-400">Update username and 5-digit PIN</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setEditingUser(null)}
+                  className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  {Icons.close}
+                </button>
+              </div>
+              <form onSubmit={handleUpdateUser} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    value={editUsername}
+                    onChange={(e) => setEditUsername(e.target.value)}
+                    placeholder="e.g. john_doe"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all font-medium text-slate-800"
+                    required
+                    maxLength={50}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Gmail Address
+                  </label>
+                  <input
+                    type="email"
+                    value={editUserEmail}
+                    onChange={(e) => setEditUserEmail(e.target.value)}
+                    placeholder="e.g. student@gmail.com"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all font-medium text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    New 5-Digit PIN (Optional)
+                  </label>
+                  <input
+                    type="password"
+                    value={editUserPin}
+                    onChange={(e) => setEditUserPin(e.target.value.replace(/\D/g, "").slice(0, 5))}
+                    placeholder="Leave blank to keep existing PIN"
+                    maxLength={5}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-mono tracking-widest focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all text-slate-800"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">Leave blank to keep current PIN unchanged.</p>
+                </div>
+                <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingUser(null)}
+                    className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingUser || !editUsername.trim() || (editUserPin.length > 0 && editUserPin.length !== 5)}
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-bold text-xs shadow-md shadow-blue-500/20 hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {savingUser ? (
+                      <>
+                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        Saving...
+                      </>
+                    ) : (
+                      "Save Changes"
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
       </div>
