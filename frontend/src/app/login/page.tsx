@@ -449,10 +449,16 @@ export default function LoginPage() {
                 <p className="text-sm text-slate-600 mb-6 leading-relaxed">
                   {regSuccessMessage}
                 </p>
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 mb-6 text-xs text-slate-500 text-left space-y-1">
-                  <div>• Your 5-digit PIN has been emailed to you.</div>
-                  <div>• Check your inbox and spam folder.</div>
-                  <div>• Switch to the Sign In tab and enter your credentials.</div>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6 text-xs text-slate-500 text-left space-y-1.5">
+                  <div className="flex items-center gap-2 text-slate-700 font-medium">
+                    <span className="text-emerald-500">✓</span> A secure 5-digit PIN was sent to your email.
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-700 font-medium">
+                    <span className="text-emerald-500">✓</span> Check your inbox and spam / promotions folder.
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-700 font-medium">
+                    <span className="text-emerald-500">✓</span> Enter your PIN in the Sign In form to log in.
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -460,9 +466,9 @@ export default function LoginPage() {
                     setRegSuccessMessage(null);
                     setActiveTab("login");
                   }}
-                  className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm transition-all shadow-md shadow-emerald-600/20"
+                  className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold rounded-xl text-sm transition-all shadow-md shadow-emerald-600/20"
                 >
-                  Proceed to Sign In
+                  Proceed to Sign In &rarr;
                 </button>
               </div>
             </div>
