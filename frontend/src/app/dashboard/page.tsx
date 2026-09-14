@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getQuizzes, getDashboard, startQuiz, requestQuizRetake, QuizItem } from "@/lib/api";
@@ -154,6 +154,19 @@ function getGreeting(): { text: string; emoji: string } {
   return { text: "Good evening", emoji: "🌙" };
 }
 
+// ─── CHAPTER & PART GROUPING HELPERS ───────────────────────────
+function extractChapterTitle(fullTitle: string): string {
+  const cleaned = fullTitle
+    .replace(/\s*[\(\[\-:]?\s*Part\s*\d+[\)\]]?\s*$/i, "")
+    .trim();
+  return cleaned || fullTitle;
+}
+
+function extractPartNumber(fullTitle: string): number | null {
+  const match = fullTitle.match(/Part\s*(\d+)/i);
+  return match ? parseInt(match[1], 10) : null;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // MAIN DASHBOARD COMPONENT
 // ═══════════════════════════════════════════════════════════════
@@ -167,6 +180,90 @@ export default function DashboardPage() {
   const [expandedQuiz, setExpandedQuiz] = useState<number | null>(null);
   const [startingQuiz, setStartingQuiz] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"quizzes" | "history">("quizzes");
+
+  // Chapter Accordion State
+  const [expandedChapters, setExpandedChapters] = useState<Record<string, boolean>>({});
+
+  // Memoized grouped chapters via TypeScript reduce
+  const chapterFolders = useMemo(() => {
+    const grouped = quizzes.reduce<Record<string, QuizItem[]>>((acc, quiz) => {
+      const chapterName = extractChapterTitle(quiz.title);
+      if (!acc[chapterName]) {
+        acc[chapterName] = [];
+      }
+      acc[chapterName].push(quiz);
+      return acc;
+    }, {});
+
+    return Object.entries(grouped).map(([chapterTitle, chapterQuizzes]) => {
+      // Sort quizzes sequentially by Part number or ID
+      const sorted = [...chapterQuizzes].sort((a, b) => {
+        const partA = extractPartNumber(a.title);
+        const partB = extractPartNumber(b.title);
+        if (partA !== null && partB !== null) return partA - partB;
+        return a.id - b.id;
+      });
+
+      const totalQuestions = sorted.reduce((sum, q) => sum + q.questionCount, 0);
+      const totalTimeMinutes = Math.round(
+        sorted.reduce((sum, q) => sum + q.timeLimit, 0) / 60
+      );
+      const availableCount = sorted.filter((q) => q.canStart).length;
+      const completedCount = sorted.filter((q) => !q.canStart || Boolean(q.attempt)).length;
+      const passedCount = sorted.filter((q) => {
+        const quizHistory = history.find((h) => h.quizId === q.id);
+        const score = q.attempt ? q.attempt.score : quizHistory?.percentage ?? 0;
+        return score >= 75;
+      }).length;
+
+      return {
+        chapterTitle,
+        quizzes: sorted,
+        totalQuestions,
+        totalTimeMinutes,
+        availableCount,
+        completedCount,
+        passedCount,
+      };
+    });
+  }, [quizzes, history]);
+
+  // Initialize chapter expansion: open first chapter by default (or all if <= 3)
+  useEffect(() => {
+    if (quizzes.length > 0) {
+      setExpandedChapters((prev) => {
+        if (Object.keys(prev).length > 0) return prev;
+        const initial: Record<string, boolean> = {};
+        const uniqueChapters = Array.from(
+          new Set(quizzes.map((q) => extractChapterTitle(q.title)))
+        );
+        uniqueChapters.forEach((ch, index) => {
+          initial[ch] = index === 0 || uniqueChapters.length <= 3;
+        });
+        return initial;
+      });
+    }
+  }, [quizzes]);
+
+  const toggleChapter = (chapterTitle: string) => {
+    setExpandedChapters((prev) => ({
+      ...prev,
+      [chapterTitle]: !prev[chapterTitle],
+    }));
+  };
+
+  const allExpanded =
+    chapterFolders.length > 0 &&
+    chapterFolders.every((ch) => expandedChapters[ch.chapterTitle]);
+
+  const toggleAllChapters = () => {
+    const nextState = !allExpanded;
+    const updated: Record<string, boolean> = {};
+    chapterFolders.forEach((ch) => {
+      updated[ch.chapterTitle] = nextState;
+    });
+    setExpandedChapters(updated);
+  };
 
   // Retake modal state
   const [retakeModalQuiz, setRetakeModalQuiz] = useState<QuizItem | null>(null);
@@ -534,179 +631,303 @@ export default function DashboardPage() {
                 <p className="text-sm text-slate-500">Check back soon for new assessments</p>
               </div>
             ) : (
-              <div className="grid gap-4">
-                {quizzes.map((quiz, i) => {
-                  const quizHistory = history.find((h) => h.quizId === quiz.id);
-                  const attemptScore = quiz.attempt ? quiz.attempt.score : quizHistory?.percentage ?? 0;
-                  const hasAttempt = !quiz.canStart || Boolean(quiz.attempt);
-                  const retakeStatus = quiz.retakeRequest?.status;
+              <div className="space-y-4">
+                {/* Chapter count & Expand/Collapse All Toolbar */}
+                <div className="flex items-center justify-between px-1 flex-wrap gap-2">
+                  <span className="text-xs sm:text-sm font-semibold text-slate-500">
+                    {chapterFolders.length} {chapterFolders.length === 1 ? "Chapter Folder" : "Chapter Folders"} · {quizzes.length} Total Assessments
+                  </span>
+                  {chapterFolders.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={toggleAllChapters}
+                      className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100/80 px-3 py-1.5 rounded-xl border border-emerald-200/80 transition-colors"
+                    >
+                      <span>{allExpanded ? "Collapse All" : "Expand All"}</span>
+                      <svg
+                        className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                          allExpanded ? "rotate-180" : ""
+                        }`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
+                {/* Chapter Folders Accordion */}
+                {chapterFolders.map((folder, folderIdx) => {
+                  const isOpen = Boolean(expandedChapters[folder.chapterTitle]);
+                  const isAllCompleted = folder.completedCount === folder.quizzes.length;
+                  const isPartiallyStarted = folder.completedCount > 0 && !isAllCompleted;
 
                   return (
                     <div
-                      key={quiz.id}
-                      className="group relative bg-white rounded-2xl border border-slate-100 overflow-hidden hover:border-emerald-200/60 hover:shadow-xl hover:shadow-emerald-500/5 transition-all duration-300 animate-fade-in"
-                      style={{ animationDelay: `${i * 60}ms` }}
+                      key={folder.chapterTitle}
+                      className="group/folder bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md hover:border-emerald-300/80 transition-all duration-200 overflow-hidden animate-fade-in"
+                      style={{ animationDelay: `${folderIdx * 60}ms` }}
                     >
-                      {/* Left accent bar */}
-                      <div
-                        className={`absolute left-0 top-0 bottom-0 w-1 ${
-                          quiz.canStart
-                            ? "bg-gradient-to-b from-emerald-400 to-teal-500"
-                            : "bg-gradient-to-b from-blue-400 to-indigo-500"
-                        }`}
-                      />
-
-                      <div className="p-6 pl-7 flex flex-col md:flex-row md:items-center justify-between gap-5">
-                        <div className="flex items-center gap-4 flex-1 min-w-0">
+                      {/* Parent Chapter Folder Header */}
+                      <button
+                        type="button"
+                        onClick={() => toggleChapter(folder.chapterTitle)}
+                        className="w-full text-left p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 select-none"
+                        aria-expanded={isOpen}
+                      >
+                        <div className="flex items-center gap-4 min-w-0">
+                          {/* Folder / Module Icon */}
                           <div
-                            className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-md flex-shrink-0 ${
-                              quiz.canStart
-                                ? "bg-gradient-to-br from-emerald-400 to-teal-500 shadow-emerald-500/15"
-                                : "bg-gradient-to-br from-blue-400 to-indigo-500 shadow-blue-500/15"
+                            className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md transition-all duration-300 group-hover/folder:scale-105 ${
+                              isAllCompleted
+                                ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-emerald-500/20"
+                                : isPartiallyStarted
+                                ? "bg-gradient-to-br from-teal-500 to-cyan-600 text-white shadow-teal-500/20"
+                                : "bg-gradient-to-br from-slate-700 to-slate-900 text-white shadow-slate-900/15"
                             }`}
                           >
-                            {quiz.canStart ? (
-                              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={1.5}
-                                  d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"
-                                />
-                              </svg>
-                            ) : (
-                              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={1.5}
-                                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                                />
-                              </svg>
-                            )}
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={1.8}
+                                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                              />
+                            </svg>
                           </div>
+
+                          {/* Chapter Title & Meta Summary */}
                           <div className="min-w-0">
-                            <h3 className="font-bold text-slate-800 text-lg truncate">{quiz.title}</h3>
-                            <div className="flex items-center gap-2.5 mt-1.5 flex-wrap">
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-xs font-semibold text-slate-600">
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                                  />
-                                </svg>
-                                {quiz.questionCount} Questions
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                              <h3 className="font-extrabold text-slate-800 text-lg sm:text-xl group-hover/folder:text-emerald-700 transition-colors">
+                                {folder.chapterTitle}
+                              </h3>
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                {folder.quizzes.length} {folder.quizzes.length === 1 ? "Part" : "Parts"}
                               </span>
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-xs font-semibold text-slate-600">
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                                  />
+                            </div>
+
+                            <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-500 flex-wrap">
+                              <span className="inline-flex items-center gap-1 font-medium">
+                                <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
-                                {Math.round(quiz.timeLimit / 60)} min
+                                {folder.totalQuestions} Questions total
                               </span>
-                              {hasAttempt && (
-                                <span
-                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold ${
-                                    attemptScore >= 75
-                                      ? "bg-emerald-100 text-emerald-700"
-                                      : "bg-amber-100 text-amber-700"
-                                  }`}
-                                >
-                                  Score: {Number(attemptScore.toFixed(1))}%
-                                </span>
-                              )}
-                              {quiz.attempt && quiz.attempt.tabSwitches > 0 && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 text-xs font-bold text-rose-700">
-                                  ⚠️ {quiz.attempt.tabSwitches} tab switches
-                                </span>
-                              )}
+                              <span className="text-slate-300">&bull;</span>
+                              <span className="inline-flex items-center gap-1 font-medium">
+                                <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                ~{folder.totalTimeMinutes} min total
+                              </span>
                             </div>
                           </div>
                         </div>
 
-                        {/* Action buttons & 2nd chance request handling */}
-                        <div className="flex-shrink-0 flex items-center gap-3 flex-wrap">
-                          {quiz.canStart ? (
-                            <button
-                              onClick={() => handleStartQuiz(quiz.id)}
-                              disabled={startingQuiz === quiz.id}
-                              className="group/btn relative inline-flex items-center gap-2.5 px-6 py-3 text-sm font-bold text-white rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 shadow-md shadow-emerald-500/25 hover:shadow-lg hover:shadow-emerald-500/30 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 disabled:opacity-60"
-                            >
-                              {startingQuiz === quiz.id ? (
-                                <>
-                                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                    <path
-                                      className="opacity-75"
-                                      fill="currentColor"
-                                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                                    />
-                                  </svg>
-                                  Starting...
-                                </>
-                              ) : (
-                                <>
-                                  Start Quiz
-                                  <svg
-                                    className="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={2.5}
-                                      d="M17 8l4 4m0 0l-4 4m4-4H3"
-                                    />
-                                  </svg>
-                                </>
-                              )}
-                            </button>
+                        {/* Right side: Progress indicator & Rotating chevron */}
+                        <div className="flex items-center gap-3 self-end sm:self-center flex-shrink-0">
+                          {isAllCompleted ? (
+                            <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-sm">
+                              <span>✓</span> All Parts Completed ({folder.passedCount}/{folder.quizzes.length} Passed)
+                            </span>
+                          ) : isPartiallyStarted ? (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200">
+                              <span>⏳</span> In Progress ({folder.completedCount}/{folder.quizzes.length} Completed)
+                            </span>
                           ) : (
-                            <div className="flex items-center gap-3 flex-wrap">
-                              <ScoreBar percentage={attemptScore} />
-
-                              {/* Retake status badge or Request button */}
-                              {retakeStatus === "pending" ? (
-                                <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 shadow-sm">
-                                  <span className="animate-pulse">⏳</span> 2nd Chance Pending Review
-                                </span>
-                              ) : retakeStatus === "declined" ? (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setRetakeModalQuiz(quiz);
-                                    setRetakeReason("");
-                                    setRetakeError(null);
-                                  }}
-                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors"
-                                >
-                                  ❌ Declined · Re-Appeal
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setRetakeModalQuiz(quiz);
-                                    setRetakeReason("");
-                                    setRetakeError(null);
-                                  }}
-                                  className="group/req inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100/90 border border-amber-200 shadow-sm hover:shadow transition-all"
-                                >
-                                  <span>🔄</span> Request 2nd Chance
-                                </button>
-                              )}
-                            </div>
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 text-slate-600">
+                              {folder.availableCount} Parts Available
+                            </span>
                           )}
+
+                          {/* Right-aligned Smooth Rotating Chevron */}
+                          <div
+                            className={`w-9 h-9 rounded-xl flex items-center justify-center bg-slate-100 text-slate-500 group-hover/folder:bg-emerald-50 group-hover/folder:text-emerald-700 transition-all duration-300 ${
+                              isOpen ? "rotate-180 bg-emerald-100 text-emerald-700 shadow-sm" : ""
+                            }`}
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </div>
                         </div>
-                      </div>
+                      </button>
+
+                      {/* Accordion Child Cards (Expanded) */}
+                      {isOpen && (
+                        <div className="border-t border-slate-100 bg-gradient-to-b from-slate-50/80 via-slate-50/50 to-white p-4 sm:p-6 animate-fade-in">
+                          <div className="space-y-3.5 ml-2 sm:ml-4 pl-3 sm:pl-5 border-l-2 border-emerald-200/80">
+                            {folder.quizzes.map((quiz, quizIdx) => {
+                              const quizHistory = history.find((h) => h.quizId === quiz.id);
+                              const attemptScore = quiz.attempt ? quiz.attempt.score : quizHistory?.percentage ?? 0;
+                              const hasAttempt = !quiz.canStart || Boolean(quiz.attempt);
+                              const retakeStatus = quiz.retakeRequest?.status;
+                              const partNum = extractPartNumber(quiz.title);
+                              const partLabel = partNum !== null ? `Part ${partNum}` : `Part ${quizIdx + 1}`;
+
+                              return (
+                                <div
+                                  key={quiz.id}
+                                  className="group/child relative bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-sm hover:border-emerald-300 hover:shadow-md transition-all duration-200 flex flex-col md:flex-row md:items-center justify-between gap-4"
+                                >
+                                  {/* Left accent bar on child card */}
+                                  <div
+                                    className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-xl ${
+                                      quiz.canStart
+                                        ? "bg-gradient-to-b from-emerald-400 to-teal-500"
+                                        : "bg-gradient-to-b from-blue-400 to-indigo-500"
+                                    }`}
+                                  />
+
+                                  <div className="flex items-center gap-3.5 flex-1 min-w-0 pl-1 sm:pl-2">
+                                    {/* Part Icon */}
+                                    <div
+                                      className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm ${
+                                        quiz.canStart
+                                          ? "bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow-emerald-500/15"
+                                          : "bg-gradient-to-br from-blue-400 to-indigo-500 text-white shadow-blue-500/15"
+                                      }`}
+                                    >
+                                      {quiz.canStart ? (
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={1.75}
+                                            d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"
+                                          />
+                                        </svg>
+                                      ) : (
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                      )}
+                                    </div>
+
+                                    {/* Part Title and Meta info */}
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-extrabold uppercase tracking-wide bg-slate-100 text-slate-700 border border-slate-200/60">
+                                          {partLabel}
+                                        </span>
+                                        <h4 className="font-bold text-slate-800 text-base truncate">
+                                          {quiz.title}
+                                        </h4>
+                                      </div>
+
+                                      <div className="flex items-center gap-2 mt-1.5 flex-wrap text-xs">
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 font-semibold text-slate-600">
+                                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                          </svg>
+                                          {quiz.questionCount} Questions
+                                        </span>
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 font-semibold text-slate-600">
+                                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                          </svg>
+                                          {Math.round(quiz.timeLimit / 60)} min
+                                        </span>
+                                        {hasAttempt && (
+                                          <span
+                                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold ${
+                                              attemptScore >= 75
+                                                ? "bg-emerald-100 text-emerald-700"
+                                                : "bg-amber-100 text-amber-700"
+                                            }`}
+                                          >
+                                            Score: {Number(attemptScore.toFixed(1))}%
+                                          </span>
+                                        )}
+                                        {quiz.attempt && quiz.attempt.tabSwitches > 0 && (
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 text-xs font-bold text-rose-700">
+                                            ⚠️ {quiz.attempt.tabSwitches} tab switches
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Action Buttons & 2nd Chance Request */}
+                                  <div className="flex-shrink-0 flex items-center gap-3 flex-wrap pl-1 sm:pl-2 md:pl-0">
+                                    {quiz.canStart ? (
+                                      <button
+                                        onClick={() => handleStartQuiz(quiz.id)}
+                                        disabled={startingQuiz === quiz.id}
+                                        className="group/btn relative inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 shadow-md shadow-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/30 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 disabled:opacity-60"
+                                      >
+                                        {startingQuiz === quiz.id ? (
+                                          <>
+                                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                            </svg>
+                                            Starting...
+                                          </>
+                                        ) : (
+                                          <>
+                                            Start Quiz
+                                            <svg
+                                              className="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              viewBox="0 0 24 24"
+                                            >
+                                              <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2.5}
+                                                d="M17 8l4 4m0 0l-4 4m4-4H3"
+                                              />
+                                            </svg>
+                                          </>
+                                        )}
+                                      </button>
+                                    ) : (
+                                      <div className="flex items-center gap-3 flex-wrap">
+                                        <ScoreBar percentage={attemptScore} />
+
+                                        {retakeStatus === "pending" ? (
+                                          <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 shadow-sm">
+                                            <span className="animate-pulse">⏳</span> 2nd Chance Pending Review
+                                          </span>
+                                        ) : retakeStatus === "declined" ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setRetakeModalQuiz(quiz);
+                                              setRetakeReason("");
+                                              setRetakeError(null);
+                                            }}
+                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors"
+                                          >
+                                            ❌ Declined · Re-Appeal
+                                          </button>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setRetakeModalQuiz(quiz);
+                                              setRetakeReason("");
+                                              setRetakeError(null);
+                                            }}
+                                            className="group/req inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100/90 border border-amber-200 shadow-sm hover:shadow transition-all"
+                                          >
+                                            <span>🔄</span> Request 2nd Chance
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
