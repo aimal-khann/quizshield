@@ -121,7 +121,7 @@ function ProgressRing({
 
 // ─── SCORE BAR ─────────────────────────────────────────────────
 function ScoreBar({ percentage }: { percentage: number }) {
-  const isPassed = percentage >= 75;
+  const isPassed = percentage >= 70;
   const formattedPercentage = Number(percentage.toFixed(2));
   return (
     <div className="flex items-center gap-3">
@@ -213,7 +213,7 @@ export default function DashboardPage() {
       const passedCount = sorted.filter((q) => {
         const quizHistory = history.find((h) => h.quizId === q.id);
         const score = q.attempt ? q.attempt.score : quizHistory?.percentage ?? 0;
-        return score >= 75;
+        return score >= 70;
       }).length;
 
       return {
@@ -360,7 +360,7 @@ export default function DashboardPage() {
   // ─── COMPUTED STATS ───
   const completedCount = history.length;
   const passedCount = history.filter(
-    (h) => h.status === "Passed" || h.percentage >= 75
+    (h) => h.status === "Passed" || h.percentage >= 70
   ).length;
   const avgScore =
     history.length > 0
@@ -834,7 +834,7 @@ export default function DashboardPage() {
                                         {hasAttempt && (
                                           <span
                                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold ${
-                                              attemptScore >= 75
+                                              attemptScore >= 70
                                                 ? "bg-emerald-100 text-emerald-700"
                                                 : "bg-amber-100 text-amber-700"
                                             }`}
@@ -958,7 +958,7 @@ export default function DashboardPage() {
               <div className="space-y-3">
                 {history.map((entry, i) => {
                   const scorePercentage = Number(entry.percentage.toFixed(2));
-                  const isPassed = entry.status === "Passed" || scorePercentage >= 75;
+                  const isPassed = entry.status === "Passed" || scorePercentage >= 70;
                   const isExpanded = expandedQuiz === entry.quizId;
 
                   return (
