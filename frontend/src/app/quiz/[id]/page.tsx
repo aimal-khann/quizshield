@@ -335,7 +335,7 @@ export default function QuizPage({
 
   // ─── RESULT STATE ───
   if (submitted && result) {
-    const isPassed = result.score >= 75;
+    const isPassed = result.score >= 70;
     return (
       <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 p-4">
         <div className="bg-white rounded-2xl border border-slate-100 shadow-xl p-10 max-w-md w-full text-center animate-fade-in">
