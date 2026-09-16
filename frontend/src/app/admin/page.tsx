@@ -814,7 +814,7 @@ export default function AdminPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {filtered.map((a) => {
-                        const isPassed = a.status === "passed" || a.score >= 75;
+                        const isPassed = a.status === "passed" || a.score >= 70;
                         const key = `${a.username}-${a.quizId}`;
                         return (
                           <tr key={a.attemptId} className="hover:bg-slate-50/50 transition-colors group">
@@ -829,7 +829,7 @@ export default function AdminPage() {
                             <td className="px-6 py-4 text-slate-600 font-medium">{a.quizTitle}</td>
                             <td className="px-6 py-4 text-center">
                               <span className={`inline-flex items-center justify-center w-12 h-8 rounded-lg text-xs font-extrabold ${
-                                a.score >= 75 ? "bg-emerald-100 text-emerald-700" : a.score >= 50 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-600"
+                                a.score >= 70 ? "bg-emerald-100 text-emerald-700" : a.score >= 50 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-600"
                               }`}>
                                 {a.score.toFixed(0)}%
                               </span>
@@ -1382,7 +1382,7 @@ Answer: C`}
                                   {u.attempts.length} attempt{u.attempts.length !== 1 ? "s" : ""}
                                 </span>
                                 {u.attempts.length > 0 && (
-                                  <span className={`text-xs font-bold ${avgScore >= 75 ? "text-emerald-600" : avgScore >= 50 ? "text-amber-600" : "text-red-500"}`}>
+                                  <span className={`text-xs font-bold ${avgScore >= 70 ? "text-emerald-600" : avgScore >= 50 ? "text-amber-600" : "text-red-500"}`}>
                                     Avg: {avgScore.toFixed(0)}%
                                   </span>
                                 )}
